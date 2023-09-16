@@ -1,98 +1,19 @@
-# import DRF
+# import DRF and FileResponse
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
-from django.http import JsonResponse, FileResponse
 from rest_framework import status
+from django.http import FileResponse
+# Data operator
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
-from decimal import Decimal  # Import Decimal
-
+# Import Decimal
+from decimal import Decimal 
 # import database models and serializers
 from .models import *
 from .serializers import *
 
-# reading API endpoints
-@api_view(['GET'])
-def get_project_data(request, project_address):
-    try:
-        project = Project.objects.get(project_address=project_address)
-        project_serializer = ProjectReadSerializer(instance=project, context={'request': request})
-
-        return Response({"response": 1, "data": project_serializer.data}, status=status.HTTP_200_OK)
-    except Project.DoesNotExist:
-        return JsonResponse({'error': 'Project not found'}, status=404)
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=400)
-
-@api_view(['GET'])
-def get_community_proposals(request, project_address):
-    try:
-        project = Project.objects.get(project_address=project_address)
-        # Filter community proposals based on the project address
-        queryset = CommunityProposal.objects.filter(project=project.id)
-        serializer = CommunityProposalReadSerializer(queryset, many=True)
-
-        # Create the custom response
-        custom_response = {
-            "response": 1,
-            "data": serializer.data
-        }
-        return Response(custom_response, status=status.HTTP_200_OK)
-
-    except Project.DoesNotExist:
-        return JsonResponse({'error': 'Project not found'}, status=404)
-    except CommunityProposal.DoesNotExist:
-        return Response({'error': 'No community proposals found for the given project address.'}, status=status.HTTP_404_NOT_FOUND)
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=400)
-
-@api_view(['GET'])
-def get_votes(request, proposal_id):
-    try:
-        # Query the database to get all votes for the given proposal_id
-        votes = Vote.objects.filter(proposal=proposal_id)
-        
-        # Serialize the votes data
-        serializer = VoteReadSerializer(votes, many=True)
-        
-        # Return the serialized data as a response
-        return Response({"response": 1, "data": serializer.data}, status=status.HTTP_200_OK)
-    
-    except Vote.DoesNotExist:
-        return Response({'error': 'No votes found for the given proposal ID.'}, status=status.HTTP_404_NOT_FOUND)
-    except Exception as e:
-        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-@api_view(['GET'])
-def search_projects(request):
-    filter_field = request.query_params.get('field', None)
-    filter_value = request.query_params.get('value', '')
-
-    # Define a dictionary to map query parameters to model fields
-    field_mapping = {
-        'title': 'title__icontains',
-        'category': 'category__name__icontains',
-        'fundraiser': 'fundraiser__address',
-        'contributor': 'contribution__user__address',
-    }
-
-    # Check if the specified field is valid
-    if filter_field not in field_mapping:
-        return JsonResponse({'error': 'Invalid filter field'}, status=status.HTTP_400_BAD_REQUEST)
-
-    # Get the corresponding lookup field
-    query = {field_mapping[filter_field]: filter_value}
-
-    # Get the project set
-    projects = Project.objects.filter(**query).distinct()
-
-    # Serialize the filtered projects
-    serializer = ProjectReadSerializer(projects, many=True, context={'request': request})
-
-    return Response({"response": 1, "data": serializer.data}, status=status.HTTP_200_OK)
-
-# writing API endpoints
+# Creating API endpoints
 @api_view(['POST'])
 @parser_classes([MultiPartParser, FormParser])
 def initiate_project(request):
@@ -130,16 +51,16 @@ def initiate_project(request):
 
             for image in images:
                 media_data = {'image': image, 'project': project.id}
-                media_serializer = MediaWriteSerializer(data=media_data)
+                media_serializer = MediaSerializer(data=media_data)
                 if media_serializer.is_valid():
                     media_serializer.save()
 
             return Response(status=status.HTTP_200_OK)
         else:
-            return JsonResponse({'errors': project_serializer.errors}, status=400) 
+            return Response({'errors': project_serializer.errors}, status=status.HTTP_400_BAD_REQUEST) 
 
     except Exception as e:
-        return JsonResponse({'error': str(e)}, status=400)
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['POST'])
 def contribute_project(request):
@@ -260,7 +181,88 @@ def vote_community_action(request):
         # Respond with validation errors
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# updating API endpoints
+# Reading API endpoints
+@api_view(['GET'])
+def get_project_data(request, project_address):
+    try:
+        project = Project.objects.get(project_address=project_address)
+        project_serializer = ProjectReadSerializer(instance=project, context={'request': request})
+
+        return Response({"response": 1, "data": project_serializer.data}, status=status.HTTP_200_OK)
+    except Project.DoesNotExist:
+        return Response({'error': 'Project not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET'])
+def get_community_proposals(request, project_address):
+    try:
+        project = Project.objects.get(project_address=project_address)
+        # Filter community proposals based on the project address
+        queryset = CommunityProposal.objects.filter(project=project.id)
+        serializer = CommunityProposalReadSerializer(queryset, many=True)
+
+        # Create the custom response
+        custom_response = {
+            "response": 1,
+            "data": serializer.data
+        }
+        return Response(custom_response, status=status.HTTP_200_OK)
+
+    except Project.DoesNotExist:
+        return Response({'error': 'Project not found'}, status=status.HTTP_404_NOT_FOUND)
+    except CommunityProposal.DoesNotExist:
+        return Response({'error': 'No community proposals found for the given project address.'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET'])
+def get_votes(request, proposal_id):
+    try:
+        # Query the database to get all votes for the given proposal_id
+        votes = Vote.objects.filter(proposal=proposal_id)
+        
+        # Serialize the votes data
+        serializer = VoteReadSerializer(votes, many=True)
+        
+        # Return the serialized data as a response
+        return Response({"response": 1, "data": serializer.data}, status=status.HTTP_200_OK)
+    
+    except Vote.DoesNotExist:
+        return Response({'error': 'No votes found for the given proposal ID.'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET'])
+def search_projects(request):
+    filter_field = request.query_params.get('field', None)
+    filter_value = request.query_params.get('value', '')
+
+    # Define a dictionary to map query parameters to model fields
+    field_mapping = {
+        'title': 'title__icontains',
+        'category': 'category__name__icontains',
+        'fundraiser': 'fundraiser__address',
+        'contributor': 'contribution__user__address',
+    }
+
+    # Check if the specified field is valid
+    if filter_field not in field_mapping:
+        return Response({'error': 'Invalid filter field'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Get the corresponding lookup field
+    query = {field_mapping[filter_field]: filter_value}
+
+    # Get the project set
+    projects = Project.objects.filter(**query).distinct()
+
+    # Serialize the filtered projects
+    serializer = ProjectReadSerializer(projects, many=True, context={'request': request})
+
+    return Response({"response": 1, "data": serializer.data}, status=status.HTTP_200_OK)
+
+
+# Updating API endpoints
 @api_view(['PUT'])
 def update_comment(request, comment_id):
     try:
@@ -275,7 +277,7 @@ def update_comment(request, comment_id):
 
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# deleting API endpoints
+# Deleting API endpoints
 @api_view(['DELETE'])
 def delete_comment(request, comment_id):
     try:

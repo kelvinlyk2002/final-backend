@@ -2,8 +2,11 @@
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
-from django.http import JsonResponse
+from django.http import JsonResponse, FileResponse
 from rest_framework import status
+from django.db.models import Sum
+from django.db.models.functions import Coalesce
+from decimal import Decimal  # Import Decimal
 
 # import database models and serializers
 from .models import *
@@ -22,6 +25,72 @@ def get_project_data(request, project_address):
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=400)
 
+@api_view(['GET'])
+def get_community_proposals(request, project_address):
+    try:
+        project = Project.objects.get(project_address=project_address)
+        # Filter community proposals based on the project address
+        queryset = CommunityProposal.objects.filter(project=project.id)
+        serializer = CommunityProposalReadSerializer(queryset, many=True)
+
+        # Create the custom response
+        custom_response = {
+            "response": 1,
+            "data": serializer.data
+        }
+        return Response(custom_response, status=status.HTTP_200_OK)
+
+    except Project.DoesNotExist:
+        return JsonResponse({'error': 'Project not found'}, status=404)
+    except CommunityProposal.DoesNotExist:
+        return Response({'error': 'No community proposals found for the given project address.'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=400)
+
+@api_view(['GET'])
+def get_votes(request, proposal_id):
+    try:
+        # Query the database to get all votes for the given proposal_id
+        votes = Vote.objects.filter(proposal=proposal_id)
+        
+        # Serialize the votes data
+        serializer = VoteReadSerializer(votes, many=True)
+        
+        # Return the serialized data as a response
+        return Response({"response": 1, "data": serializer.data}, status=status.HTTP_200_OK)
+    
+    except Vote.DoesNotExist:
+        return Response({'error': 'No votes found for the given proposal ID.'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET'])
+def search_projects(request):
+    filter_field = request.query_params.get('field', None)
+    filter_value = request.query_params.get('value', '')
+
+    # Define a dictionary to map query parameters to model fields
+    field_mapping = {
+        'title': 'title__icontains',
+        'category': 'category__name__icontains',
+        'fundraiser': 'fundraiser__address',
+        'contributor': 'contribution__user__address',
+    }
+
+    # Check if the specified field is valid
+    if filter_field not in field_mapping:
+        return JsonResponse({'error': 'Invalid filter field'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Get the corresponding lookup field
+    query = {field_mapping[filter_field]: filter_value}
+
+    # Get the project set
+    projects = Project.objects.filter(**query).distinct()
+
+    # Serialize the filtered projects
+    serializer = ProjectReadSerializer(projects, many=True, context={'request': request})
+
+    return Response({"response": 1, "data": serializer.data}, status=status.HTTP_200_OK)
 
 # writing API endpoints
 @api_view(['POST'])
@@ -29,15 +98,15 @@ def get_project_data(request, project_address):
 def initiate_project(request):
     try:
         network, _ = Network.objects.get_or_create(
-            name = request.data.get('chain', 'Optimism Goerli'), 
+            name = request.data.get('chain', 'Optimism Goerli Testnet'), 
             chainid = request.data.get('chainid', 420)
             )
         currency, _ = Currency.objects.get_or_create(
             address = request.data.get('currency', ''),
+            name = request.data.get('currencyName', 'ERC20'),
             network = network
             )
         category, _ = Category.objects.get_or_create(name=request.data.get('category'))
-        project_status, _ = Status.objects.get_or_create(name='active')
         fundraiser, _ = User.objects.get_or_create(address=request.data.get('walletAddress'))
 
         project_data = {
@@ -45,7 +114,6 @@ def initiate_project(request):
             'description': request.data.get('description', ''),
             'currency': [currency.id], 
             'category': category.id,
-            'status': project_status.id,
             'project_address': request.data.get('projectAddress', ''),
             'community_oversight': request.data.get('communityOversight', False),
             'release_epoch': request.data.get('releaseEpoch', 0),
@@ -139,3 +207,80 @@ def add_project_comment(request):
         serializer.save()
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+def propose_community_action(request):
+    project_address = request.data.get('projectAddress')
+    if not project_address:
+        return Response({'error': 'Project address not provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        project = Project.objects.get(project_address=project_address)
+    except Project.DoesNotExist:
+        return Response({'error': 'Project not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    project_data = {
+        'project': project.id,
+        'title': request.data.get('title', ''),
+        'description': request.data.get('description', ''),
+        'onchain_proposal_nonce': request.data.get('onchain_proposal_nonce', ''),
+    }
+    serializer = CommunityProposalWriteSerializer(data=project_data)
+
+    if serializer.is_valid():
+        serializer.save()
+        return Response({'response': 1, 'message': 'Propose successful'}, status=status.HTTP_201_CREATED)
+    else:
+        return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+def vote_community_action(request):
+    try:
+        voter = User.objects.get(address=request.data.get('user'))
+    except User.DoesNotExist:
+        return Response({'error': 'User is not a voter'}, status=status.HTTP_404_NOT_FOUND)
+
+    vote_data = {
+        'voter': voter.id,
+        'proposal': request.data.get('proposal'),
+        'weight': request.data.get('weight'),
+        'vote': request.data.get('vote'),
+        'hsh': request.data.get('hsh'),
+    }
+    
+    # Deserialize the request data
+    serializer = VoteWriteSerializer(data=vote_data)
+    if serializer.is_valid():
+        # Save the vote to the database
+        serializer.save()
+
+        # Respond with a success message
+        return Response({'message': 'Vote recorded successfully'}, status=status.HTTP_201_CREATED)
+    else:
+        # Respond with validation errors
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+# updating API endpoints
+@api_view(['PUT'])
+def update_comment(request, comment_id):
+    try:
+        comment = Comment.objects.get(pk=comment_id)
+    except Comment.DoesNotExist:
+        return Response({'error': 'Comment not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    serializer = CommentWriteSerializer(comment, data=request.data, partial=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+# deleting API endpoints
+@api_view(['DELETE'])
+def delete_comment(request, comment_id):
+    try:
+        comment = Comment.objects.get(pk=comment_id)
+        comment.delete()
+        return Response({'message': 'Comment deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
+    except Comment.DoesNotExist:
+        return Response({'error': 'Comment not found'}, status=status.HTTP_404_NOT_FOUND)

@@ -20,12 +20,6 @@ class User(models.Model):
     def __str__(self):
             return self.address
 
-class Status(models.Model):
-    # status names (Active / Inactive / Blocked etc)
-    name = models.CharField(null=False, blank=False, max_length=100)
-    def __str__(self):
-        return self.name
-
 class Currency(models.Model):
     # address
     address = models.CharField(null=False, blank=False, default="0x", max_length=42)
@@ -45,8 +39,6 @@ class Project(models.Model):
     currency = models.ManyToManyField(Currency)
     # category of the project
     category = models.ForeignKey(Category, on_delete=models.PROTECT)
-    # status of the project
-    status = models.ForeignKey(Status, on_delete=models.PROTECT)
     # project address
     project_address = models.CharField(max_length=42)
     # community oversight
@@ -83,10 +75,6 @@ class Contribution(models.Model):
 class CommunityProposal(models.Model):
     # link to project
     project = models.ForeignKey(Project, on_delete=models.CASCADE)
-    # timestamp
-    created_at = models.DateTimeField(auto_now_add=True)
-    # status
-    status = models.ForeignKey(Status, on_delete=models.PROTECT)
     # title
     title = models.CharField(null=False, blank=False, max_length=100)
     # description
@@ -103,3 +91,17 @@ class Comment(models.Model):
     user = models.ForeignKey(User, on_delete=models.PROTECT)
     # initiation time
     created_at = models.DateTimeField(auto_now_add=True)
+
+class Vote(models.Model):
+    # voter
+    voter = models.ForeignKey(User, on_delete=models.CASCADE)
+    # proposal
+    proposal = models.ForeignKey(CommunityProposal, on_delete=models.CASCADE)
+    # voting weight
+    weight = models.DecimalField(max_digits=80, decimal_places=18)
+    # time
+    created_at = models.DateTimeField(auto_now_add=True)
+    # vote
+    vote = models.BooleanField()
+    # transaction hash
+    hsh = models.CharField(null=False, blank=False, default="0x", max_length=100)

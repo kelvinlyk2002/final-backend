@@ -18,11 +18,6 @@ class UserReadSerializer(serializers.ModelSerializer):
         model = User
         fields = ['address']
 
-class StatusReadSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Status
-        fields = ['name']
-
 class CurrencyReadSerializer(serializers.ModelSerializer):
     class Meta:
         model = Currency
@@ -36,14 +31,13 @@ class MediaReadSerializer(serializers.ModelSerializer):
 class ContributionReadSerializer(serializers.ModelSerializer):
     class Meta:
         model = Contribution
-        # fields = ['id', 'project', 'created_at', 'usd_amount', 'user', 'currency', 'amount', 'hsh']
         fields = ['created_at', 'usd_amount', 'user', 'currency', 'amount', 'hsh']
         depth = 1
 
 class CommunityProposalReadSerializer(serializers.ModelSerializer):
     class Meta:
         model = CommunityProposal
-        fields = ['id', 'project', 'created_at', 'status', 'title', 'description', 'onchain_proposal_nonce']
+        fields = ['id', 'title', 'description', 'onchain_proposal_nonce']
 
 class CommentReadSerializer(serializers.ModelSerializer):
     class Meta:
@@ -55,8 +49,7 @@ class ProjectReadSerializer(serializers.ModelSerializer):
     fundraiser = UserReadSerializer()
     currencies = CurrencyReadSerializer(many=True, read_only=True, source='currency.all')
     category = CategoryReadSerializer()
-    status = StatusReadSerializer()
-    media = MediaReadSerializer(many=True, read_only=True)
+    media = MediaReadSerializer(many=True, read_only=True, source='media_set')
     contribution = ContributionReadSerializer(many=True, read_only=True, source='contribution_set')
     community_proposals = CommunityProposalReadSerializer(many=True, read_only=True, source='communityproposal_set')
     comments = CommentReadSerializer(many=True, read_only=True, source='comment_set')
@@ -70,7 +63,6 @@ class ProjectReadSerializer(serializers.ModelSerializer):
             'description',
             'currencies',
             'category',
-            'status',
             'project_address',
             'community_oversight',
             'created_at',
@@ -82,6 +74,12 @@ class ProjectReadSerializer(serializers.ModelSerializer):
             'comments', # FK
         ]
 
+class VoteReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Vote
+        fields = ['voter', 'weight', 'vote', 'created_at', 'hsh']
+        depth = 1
+
 # writing serializers
 class MediaWriteSerializer(serializers.ModelSerializer):
     class Meta:
@@ -91,7 +89,12 @@ class MediaWriteSerializer(serializers.ModelSerializer):
 class ProjectWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Project
-        fields = ['fundraiser', 'title', 'description', 'currency', 'category', 'status', 'project_address', 'community_oversight',  'created_at', 'release_epoch', 'creation_hash']
+        fields = ['fundraiser', 'title', 'description', 'currency', 'category', 'project_address', 'community_oversight',  'created_at', 'release_epoch', 'creation_hash']
+
+class CommunityProposalWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CommunityProposal
+        fields = ['project', 'title', 'description', 'onchain_proposal_nonce']
 
 class ContributionWriteSerializer(serializers.ModelSerializer):
     contributor = serializers.CharField(write_only=True)
@@ -116,10 +119,14 @@ class ContributionWriteSerializer(serializers.ModelSerializer):
             response = requests.get(f"https://api.coinbase.com/v2/exchange-rates?currency=ETH")
         else:
             response = requests.get(f"https://api.coinbase.com/v2/exchange-rates?currency={currency.name}")
+
         if response.status_code == 200:
-            usd_rate = response.json().get('data', {}).get('rates', {}).get('USD')
-            usd_amount = float(usd_rate) * float(amount)
-        else:
+            try: # usd rate may not be available
+                usd_rate = response.json().get('data', {}).get('rates', {}).get('USD')
+                usd_amount = float(usd_rate) * float(amount)
+            except:
+                usd_amount = 0
+        else: # usd source is down
             usd_amount = 0
 
         contribution = Contribution.objects.create(
@@ -137,3 +144,8 @@ class CommentWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Comment
         fields = ['project', 'details', 'user']
+
+class VoteWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Vote
+        fields = ['voter', 'proposal', 'weight', 'vote', 'hsh']
